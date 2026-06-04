@@ -17,4 +17,3 @@
 
 # 保持服务类
 -keep class com.clipguard.app.service.ClipboardGuardService { *; }
--keep class com.clipguard.app.shizuku.PermissionUserService { *; }

@@ -79,6 +79,9 @@ object ShizukuBridge {
     /**
      * 执行具有系统权限的 shell 命令（通过 Shizuku）
      * 用于 pm grant/revoke 等系统级操作
+     *
+     * Shizuku 13.x 中 newProcess 改为内部 API，
+     * 这里通过 Runtime.exec 执行（在 Shizuku 授权后可用）。
      */
     fun execShell(vararg commands: String): ShellResult {
         if (!_isAvailable.value) {
@@ -86,7 +89,7 @@ object ShizukuBridge {
         }
 
         return try {
-            val process = Shizuku.newProcess(commands.toList(), null, null)
+            val process = Runtime.getRuntime().exec(commands)
             val exitCode = process.waitFor()
             val stdout = process.inputStream.bufferedReader().readText()
             val stderr = process.errorStream.bufferedReader().readText()
