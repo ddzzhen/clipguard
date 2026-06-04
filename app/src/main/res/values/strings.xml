@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ClipGuard</string>
+    <string name="clipboard_service_channel">剪贴板守护</string>
+    <string name="clipboard_service_desc">正在保护您的剪贴板隐私</string>
+    <string name="notification_action_view">查看详情</string>
+</resources>
