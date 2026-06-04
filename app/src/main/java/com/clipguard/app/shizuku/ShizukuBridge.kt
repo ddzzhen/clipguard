@@ -34,18 +34,18 @@ object ShizukuBridge {
                 Log.i(TAG, "Shizuku binder received")
                 _isBinderAlive.value = true
                 refreshState()
-            } } catch (_: Exception) {}
+            } } catch (_: Throwable) {}
 
             try { Shizuku.addBinderDeadListener {
                 Log.w(TAG, "Shizuku binder dead")
                 _isBinderAlive.value = false
                 refreshState()
-            } } catch (_: Exception) {}
+            } } catch (_: Throwable) {}
 
             try { Shizuku.addRequestPermissionResultListener { requestCode, grantResult ->
                 listeners.forEach { it.onRequestPermissionResult(requestCode, grantResult) }
-            } } catch (_: Exception) {}
-        } catch (_: Exception) {
+            } } catch (_: Throwable) {}
+        } catch (_: Throwable) {
             Log.e(TAG, "ShizukuBridge init failed")
         }
     }
@@ -53,7 +53,7 @@ object ShizukuBridge {
     private fun refreshState() {
         _isAvailable.value = try {
             Shizuku.pingBinder()
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             false
         }
     }
@@ -65,7 +65,7 @@ object ShizukuBridge {
         return try {
             if (!Shizuku.pingBinder()) return false
             Shizuku.checkSelfPermission() == android.content.pm.PackageManager.PERMISSION_GRANTED
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             false
         }
     }
@@ -79,7 +79,7 @@ object ShizukuBridge {
                 // 用户之前拒绝过，再次请求
             }
             Shizuku.requestPermission(requestCode)
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             Log.w(TAG, "requestPermission failed — Shizuku service may not be running")
         }
     }

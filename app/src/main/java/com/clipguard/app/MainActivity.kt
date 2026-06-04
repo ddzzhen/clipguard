@@ -11,13 +11,16 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.lifecycleScope
 import com.clipguard.app.service.ClipboardGuardService
 import com.clipguard.app.shizuku.ShizukuBridge
 import com.clipguard.app.ui.ClipboardScreen
 import com.clipguard.app.ui.HomeScreen
 import com.clipguard.app.ui.PermissionScreen
 import com.clipguard.app.ui.theme.ClipGuardTheme
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
@@ -38,17 +41,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 将 Shizuku 初始化延迟到主线程空闲时，避免 binder 未就绪崩溃
-        window.decorView.post {
+        // 用 lifecycleScope 安全延迟初始化 Shizuku，避免 decorView 空指针和 binder 未就绪
+        lifecycleScope.launch {
+            delay(200) // 等 Activity 视图完全就绪
             try {
                 ShizukuBridge.init()
-                // 延迟请求权限，等 Shizuku binder 稳定
-                window.decorView.postDelayed({
-                    try {
-                        ShizukuBridge.requestPermission(this@MainActivity)
-                    } catch (_: Exception) {}
-                }, 500)
-            } catch (_: Exception) {}
+            } catch (_: Throwable) {}
+            delay(600)
+            try {
+                ShizukuBridge.requestPermission(this@MainActivity)
+            } catch (_: Throwable) {}
         }
 
         setContent {
@@ -56,8 +58,7 @@ class MainActivity : ComponentActivity() {
                 val shizukuAvailable by ShizukuBridge.isAvailable.collectAsStateWithLifecycle()
                 val serviceRunning by _serviceRunning.collectAsStateWithLifecycle()
 
-                // 从服务获取事件日志
-                val eventState = remember { mutableStateOf(0) } // 用于触发重组
+                val eventState = remember { mutableStateOf(0) }
 
                 ClipGuardNav(
                     shizukuAvailable = shizukuAvailable,
@@ -78,7 +79,6 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun checkAndStartService() {
-        // Android 13+ 需要通知权限
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(
                     this,
@@ -110,7 +110,6 @@ fun ClipGuardNav(
 
     when (currentScreen) {
         "clipboard" -> {
-            // 为了演示，使用空列表；实际需绑定到 ClipboardGuardService.eventLog
             ClipboardScreen(
                 events = emptyList(),
                 onClearLog = { /* TODO */ },
