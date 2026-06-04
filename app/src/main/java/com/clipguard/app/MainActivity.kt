@@ -38,11 +38,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // 初始化 Shizuku
-        ShizukuBridge.init()
-
-        // 主动请求 Shizuku 权限（让 Shizuku Manager 弹出授权）
-        ShizukuBridge.requestPermission(this)
+        // 将 Shizuku 初始化延迟到主线程空闲时，避免 binder 未就绪崩溃
+        window.decorView.post {
+            try {
+                ShizukuBridge.init()
+                // 延迟请求权限，等 Shizuku binder 稳定
+                window.decorView.postDelayed({
+                    try {
+                        ShizukuBridge.requestPermission(this@MainActivity)
+                    } catch (_: Exception) {}
+                }, 500)
+            } catch (_: Exception) {}
+        }
 
         setContent {
             ClipGuardTheme {

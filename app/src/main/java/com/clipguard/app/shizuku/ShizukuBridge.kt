@@ -27,22 +27,26 @@ object ShizukuBridge {
      * 初始化 Shizuku 监听
      */
     fun init() {
-        refreshState()
-
-        Shizuku.addBinderReceivedListener {
-            Log.i(TAG, "Shizuku binder received")
-            _isBinderAlive.value = true
+        try {
             refreshState()
-        }
 
-        Shizuku.addBinderDeadListener {
-            Log.w(TAG, "Shizuku binder dead")
-            _isBinderAlive.value = false
-            refreshState()
-        }
+            try { Shizuku.addBinderReceivedListener {
+                Log.i(TAG, "Shizuku binder received")
+                _isBinderAlive.value = true
+                refreshState()
+            } } catch (_: Exception) {}
 
-        Shizuku.addRequestPermissionResultListener { requestCode, grantResult ->
-            listeners.forEach { it.onRequestPermissionResult(requestCode, grantResult) }
+            try { Shizuku.addBinderDeadListener {
+                Log.w(TAG, "Shizuku binder dead")
+                _isBinderAlive.value = false
+                refreshState()
+            } } catch (_: Exception) {}
+
+            try { Shizuku.addRequestPermissionResultListener { requestCode, grantResult ->
+                listeners.forEach { it.onRequestPermissionResult(requestCode, grantResult) }
+            } } catch (_: Exception) {}
+        } catch (_: Exception) {
+            Log.e(TAG, "ShizukuBridge init failed")
         }
     }
 
@@ -70,10 +74,14 @@ object ShizukuBridge {
      * 请求 Shizuku 权限
      */
     fun requestPermission(activity: android.app.Activity, requestCode: Int = 0) {
-        if (!hasPermission() && Shizuku.shouldShowRequestPermissionRationale()) {
-            // 用户之前拒绝过，再次请求
+        try {
+            if (!hasPermission() && Shizuku.shouldShowRequestPermissionRationale()) {
+                // 用户之前拒绝过，再次请求
+            }
+            Shizuku.requestPermission(requestCode)
+        } catch (_: Exception) {
+            Log.w(TAG, "requestPermission failed — Shizuku service may not be running")
         }
-        Shizuku.requestPermission(requestCode)
     }
 
     /**
