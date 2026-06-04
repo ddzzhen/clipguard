@@ -98,8 +98,13 @@ class ClipboardGuardService : Service() {
         val clip = clipboardManager.primaryClip ?: return@OnPrimaryClipChangedListener
         if (clip.itemCount == 0) return@OnPrimaryClipChangedListener
 
-        val text = clip.getItemAt(0).text?.toString() ?: return@OnPrimaryClipChangedListener
-        if (text.isEmpty() || text == lastClipText) return@OnPrimaryClipChangedListener // 去重
+        // Android 10+ 限制：后台应用可能读取到空文本
+        val text = clip.getItemAt(0).text?.toString()
+        if (text.isNullOrEmpty()) {
+            Log.d(TAG, "Clipboard change detected but content unreadable (Android 10+ background restriction)")
+            return@OnPrimaryClipChangedListener
+        }
+        if (text == lastClipText) return@OnPrimaryClipChangedListener
 
         lastClipText = text
         handleClipboardChange(text)
@@ -112,11 +117,10 @@ class ClipboardGuardService : Service() {
         val detectedTypes = SensitiveDataDetector.detect(text)
 
         if (DetectedType.NONE in detectedTypes && detectedTypes.size == 1) {
-            // 无敏感内容，静默记录
             addEvent(ClipboardEvent(
                 content = text.take(100),
                 detectedTypes = listOf(DetectedType.NONE),
-                sourcePackage = null,
+                sourcePackage = getForegroundPackage(),
                 actionTaken = ActionTaken.ALLOWED
             ))
             return
@@ -125,14 +129,12 @@ class ClipboardGuardService : Service() {
         Log.w(TAG, "Sensitive content detected: $detectedTypes")
 
         val action = if (autoClearEnabled && SensitiveDataDetector.shouldAutoClear(detectedTypes)) {
-            // 自动清除剪贴板（用空白内容覆盖）
             clearClipboard()
             ActionTaken.CLEARED
         } else {
             ActionTaken.WARNED
         }
 
-        // 记录事件
         addEvent(ClipboardEvent(
             content = SensitiveDataDetector.mask(text, detectedTypes),
             detectedTypes = detectedTypes,
@@ -140,7 +142,6 @@ class ClipboardGuardService : Service() {
             actionTaken = action
         ))
 
-        // 发送告警通知
         if (warnOnSensitive) {
             sendAlertNotification(detectedTypes, action)
         }

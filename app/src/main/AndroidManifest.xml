@@ -39,6 +39,16 @@
             android:exported="false"
             android:foregroundServiceType="specialUse" />
 
+        <!-- Shizuku UserService — 让 Shizuku Manager 识别本应用 -->
+        <service
+            android:name=".shizuku.PermissionUserService"
+            android:exported="true"
+            android:permission="moe.shizuku.manager.permission.API_V23">
+            <intent-filter>
+                <action android:name="moe.shizuku.manager.action.BIND_USER_SERVICE" />
+            </intent-filter>
+        </service>
+
         <!-- 开机自启广播 -->
         <receiver
             android:name=".receiver.BootReceiver"

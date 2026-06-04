@@ -40,15 +40,13 @@ fun PermissionScreen(
     var searchQuery by remember { mutableStateOf("") }
     var resultMessage by remember { mutableStateOf<String?>(null) }
 
-    // 加载应用列表
-    LaunchedEffect(shizukuAvailable) {
-        if (shizukuAvailable) {
-            isLoading = true
-            appList = withContext(Dispatchers.IO) {
-                loadInstalledApps()
-            }
-            isLoading = false
+    // 加载应用列表（不需要 Shizuku 也能加载）
+    LaunchedEffect(Unit) {
+        isLoading = true
+        appList = withContext(Dispatchers.IO) {
+            loadInstalledApps()
         }
+        isLoading = false
     }
 
     Column(
@@ -73,33 +71,26 @@ fun PermissionScreen(
         }
 
         if (!shizukuAvailable) {
-            // Shizuku 未连接提示
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+            // Shizuku 未连接提示（不阻断浏览应用列表）
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                color = ErrorRed.copy(alpha = 0.12f)
             ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Default.Block,
-                        contentDescription = null,
-                        tint = ErrorRed,
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(Icons.Default.Warning, null, tint = ErrorRed, modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        "Shizuku 未连接",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
+                        "Shizuku 未连接 — 仅可浏览，无法修改权限",
+                        fontSize = 13.sp,
                         color = ErrorRed
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        "请先启动 Shizuku 并授权 ClipGuard",
-                        color = OnDarkTextMuted
                     )
                 }
             }
-            return@Column
+            Spacer(modifier = Modifier.height(8.dp))
         }
 
         // 选中的应用详情

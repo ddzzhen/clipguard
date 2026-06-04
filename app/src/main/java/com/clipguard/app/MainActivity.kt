@@ -41,6 +41,9 @@ class MainActivity : ComponentActivity() {
         // 初始化 Shizuku
         ShizukuBridge.init()
 
+        // 主动请求 Shizuku 权限（让 Shizuku Manager 弹出授权）
+        ShizukuBridge.requestPermission(this)
+
         setContent {
             ClipGuardTheme {
                 val shizukuAvailable by ShizukuBridge.isAvailable.collectAsStateWithLifecycle()
