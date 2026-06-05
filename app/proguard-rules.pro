@@ -17,3 +17,8 @@
 
 # 保持服务类
 -keep class com.clipguard.app.service.ClipboardGuardService { *; }
+-keep class com.clipguard.app.service.ClipboardAccessibilityService { *; }
+
+# 保持 Shizuku UserService 和接口
+-keep class com.clipguard.app.shizuku.ShizukuUserService { *; }
+-keep class com.clipguard.app.shizuku.IClipGuardInterface { *; }

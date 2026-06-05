@@ -17,6 +17,14 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
+    <!-- AccessibilityService -->
+    <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE"
+        tools:ignore="BondAccessibilityService" />
+
+    <!-- 使用情况统计（识别前台应用） -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="PackageUsageStats" />
+
     <application
         android:name=".ClipGuardApp"
         android:allowBackup="true"
@@ -36,11 +44,34 @@
             </intent-filter>
         </activity>
 
-        <!-- 剪贴板守护前台服务 -->
+        <!-- 剪贴板守护前台服务（传统的 ClipboardManager 监听方式） -->
         <service
             android:name=".service.ClipboardGuardService"
             android:exported="false"
             android:foregroundServiceType="specialUse" />
+
+        <!-- 剪贴板守护 AccessibilityService（主要防护方式） -->
+        <service
+            android:name=".service.ClipboardAccessibilityService"
+            android:exported="true"
+            android:foregroundServiceType="specialUse"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <!-- Shizuku UserService（shell 权限进程中执行命令和剪贴板操作） -->
+        <service
+            android:name=".shizuku.ShizukuUserService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="moe.shizuku.api.action.BIND_USER_SERVICE" />
+            </intent-filter>
+        </service>
 
         <!-- 开机自启广播 -->
         <receiver

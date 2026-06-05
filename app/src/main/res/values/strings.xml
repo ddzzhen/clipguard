@@ -4,4 +4,5 @@
     <string name="clipboard_service_channel">剪贴板守护</string>
     <string name="clipboard_service_desc">正在保护您的剪贴板隐私</string>
     <string name="notification_action_view">查看详情</string>
+    <string name="accessibility_service_description">ClipGuard 使用无障碍服务监听剪贴板操作，以保护您的隐私数据不被恶意应用读取。不会收集或上传任何个人信息。</string>
 </resources>

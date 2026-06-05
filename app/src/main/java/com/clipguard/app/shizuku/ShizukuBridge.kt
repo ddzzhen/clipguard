@@ -1,6 +1,8 @@
 package com.clipguard.app.shizuku
 
-import android.content.Context
+import android.content.ComponentName
+import android.content.ServiceConnection
+import android.os.IBinder
 import android.util.Log
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -9,7 +11,13 @@ import rikka.shizuku.Shizuku
 
 /**
  * Shizuku 桥接层
- * 管理 Shizuku binder 生命周期，向外暴露连接状态和操作接口
+ *
+ * 管理 Shizuku binder 生命周期，提供 shell 权限命令执行和剪贴板操作。
+ *
+ * 命令执行策略（按优先级）：
+ * 1. Shizuku.newProcess() — 直接以 shell 权限执行命令（最可靠）
+ * 2. Shizuku UserService — 在独立 shell 进程中运行（备选）
+ * 3. Runtime.exec() 回退 — 普通应用权限（有限功能）
  */
 object ShizukuBridge {
 
@@ -21,7 +29,12 @@ object ShizukuBridge {
     private val _isBinderAlive = MutableStateFlow(false)
     val isBinderAlive: StateFlow<Boolean> = _isBinderAlive.asStateFlow()
 
-    private val listeners = mutableListOf<Shizuku.OnRequestPermissionResultListener>()
+    private val _isUserServiceBound = MutableStateFlow(false)
+    val isUserServiceBound: StateFlow<Boolean> = _isUserServiceBound.asStateFlow()
+
+    // UserService 代理引用
+    private var userService: IClipGuardInterface? = null
+    private val serviceLock = Any()
 
     /**
      * 初始化 Shizuku 监听
@@ -30,25 +43,95 @@ object ShizukuBridge {
         try {
             refreshState()
 
-            try { Shizuku.addBinderReceivedListener {
+            Shizuku.addBinderReceivedListener {
                 Log.i(TAG, "Shizuku binder received")
                 _isBinderAlive.value = true
                 refreshState()
-            } } catch (_: Throwable) {}
+                // binder 恢复后重新绑定 UserService
+                if (hasPermission()) bindUserService()
+            }
 
-            try { Shizuku.addBinderDeadListener {
+            Shizuku.addBinderDeadListener {
                 Log.w(TAG, "Shizuku binder dead")
                 _isBinderAlive.value = false
+                _isUserServiceBound.value = false
+                synchronized(serviceLock) { userService = null }
                 refreshState()
-            } } catch (_: Throwable) {}
+            }
 
-            try { Shizuku.addRequestPermissionResultListener { requestCode, grantResult ->
-                listeners.forEach { it.onRequestPermissionResult(requestCode, grantResult) }
-            } } catch (_: Throwable) {}
-        } catch (_: Throwable) {
-            Log.e(TAG, "ShizukuBridge init failed")
+            // 初始绑定
+            if (Shizuku.pingBinder() && hasPermission()) {
+                bindUserService()
+            }
+
+            Log.i(TAG, "ShizukuBridge initialized")
+        } catch (e: Throwable) {
+            Log.e(TAG, "ShizukuBridge init failed", e)
         }
     }
+
+    // ── UserService 绑定 ──
+
+    fun bindUserService() {
+        if (!Shizuku.pingBinder() || !hasPermission()) {
+            Log.w(TAG, "Cannot bind UserService: not available or not authorized")
+            return
+        }
+
+        try {
+            val componentName = ComponentName(
+                "com.clipguard.app",
+                "com.clipguard.app.shizuku.ShizukuUserService"
+            )
+            val args = Shizuku.UserServiceArgs(componentName)
+                .daemon(false)
+                .processNameSuffix("clipguard")
+
+            Shizuku.bindUserService(args, userServiceConnection)
+            Log.i(TAG, "UserService binding requested")
+        } catch (e: Exception) {
+            Log.e(TAG, "bindUserService failed", e)
+        }
+    }
+
+    fun unbindUserService() {
+        try {
+            Shizuku.unbindUserService(userServiceConnection, true)
+        } catch (e: Exception) {
+            Log.e(TAG, "unbindUserService failed", e)
+        }
+        synchronized(serviceLock) { userService = null }
+        _isUserServiceBound.value = false
+    }
+
+    private val userServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            Log.i(TAG, "UserService connected")
+            if (binder != null) {
+                try {
+                    // Shizuku 使用 IClipGuardInterface 进行 IPC，
+                    // binder 是 Shizuku 生成的代理对象
+                    synchronized(serviceLock) {
+                        @Suppress("UNCHECKED_CAST")
+                        userService = binder as? IClipGuardInterface
+                    }
+                    _isUserServiceBound.value = userService != null
+                    Log.i(TAG, "UserService proxy created: ${userService != null}")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to create UserService proxy", e)
+                    _isUserServiceBound.value = false
+                }
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            Log.w(TAG, "UserService disconnected")
+            synchronized(serviceLock) { userService = null }
+            _isUserServiceBound.value = false
+        }
+    }
+
+    // ── 状态检查 ──
 
     private fun refreshState() {
         _isAvailable.value = try {
@@ -58,9 +141,6 @@ object ShizukuBridge {
         }
     }
 
-    /**
-     * 检查是否已获得 Shizuku 授权
-     */
     fun hasPermission(): Boolean {
         return try {
             if (!Shizuku.pingBinder()) return false
@@ -70,41 +150,148 @@ object ShizukuBridge {
         }
     }
 
-    /**
-     * 请求 Shizuku 权限
-     */
     fun requestPermission(activity: android.app.Activity, requestCode: Int = 0) {
         try {
-            if (!hasPermission() && Shizuku.shouldShowRequestPermissionRationale()) {
-                // 用户之前拒绝过，再次请求
+            if (!hasPermission()) {
+                Shizuku.requestPermission(requestCode)
+            } else {
+                bindUserService()
             }
-            Shizuku.requestPermission(requestCode)
-        } catch (_: Throwable) {
-            Log.w(TAG, "requestPermission failed — Shizuku service may not be running")
+        } catch (e: Throwable) {
+            Log.w(TAG, "requestPermission failed", e)
         }
     }
 
+    // ── Shell 命令执行 ──
+
     /**
-     * 执行具有系统权限的 shell 命令（通过 Shizuku）
-     * 用于 pm grant/revoke 等系统级操作
+     * 以 shell 权限执行命令
      *
-     * Shizuku 13.x 中 newProcess 改为内部 API，
-     * 这里通过 Runtime.exec 执行（在 Shizuku 授权后可用）。
+     * 优先使用 Shizuku.newProcess()（shell 权限进程），
+     * 不可用时回退到 UserService 或 Runtime.exec()。
      */
     fun execShell(vararg commands: String): ShellResult {
-        if (!_isAvailable.value) {
-            return ShellResult(-1, "", "Shizuku 服务不可用，请确保 Shizuku 已启动并授权")
+        val command = commands.joinToString(" ")
+
+        // 策略1: 使用 Shizuku.newProcess()（shell 权限）
+        if (hasPermission()) {
+            try {
+                return executeViaShizuku(command)
+            } catch (e: Exception) {
+                Log.w(TAG, "Shizuku.newProcess failed, trying UserService", e)
+            }
         }
 
+        // 策略2: 使用已绑定的 UserService
+        synchronized(serviceLock) {
+            userService?.let { service ->
+                return try {
+                    val raw = service.execShell(command)
+                    parseShellResult(raw)
+                } catch (e: Exception) {
+                    Log.e(TAG, "UserService execShell failed", e)
+                    ShellResult(-1, "", "UserService error: ${e.message}")
+                }
+            }
+        }
+
+        // 策略3: 回退到 Runtime.exec()（普通权限，pm grant/revoke 会失败）
+        Log.w(TAG, "Falling back to Runtime.exec (no elevated privileges)")
+        return executeViaRuntime(command)
+    }
+
+    /**
+     * 通过 Shizuku.newProcess() 执行命令（shell 权限）
+     */
+    private fun executeViaShizuku(command: String): ShellResult {
         return try {
-            val process = Runtime.getRuntime().exec(commands)
+            Log.d(TAG, "Executing via Shizuku: $command")
+            @Suppress("DEPRECATION")
+            val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
             val exitCode = process.waitFor()
             val stdout = process.inputStream.bufferedReader().readText()
             val stderr = process.errorStream.bufferedReader().readText()
             ShellResult(exitCode, stdout, stderr)
         } catch (e: Exception) {
-            Log.e(TAG, "execShell failed", e)
-            ShellResult(-1, "", e.message ?: "未知错误")
+            Log.e(TAG, "executeViaShizuku failed", e)
+            throw e
+        }
+    }
+
+    /**
+     * 通过 Runtime.exec() 执行命令（普通应用权限）
+     */
+    private fun executeViaRuntime(command: String): ShellResult {
+        return try {
+            Log.d(TAG, "Executing via Runtime: $command")
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val exitCode = process.waitFor()
+            val stdout = process.inputStream.bufferedReader().readText()
+            val stderr = process.errorStream.bufferedReader().readText()
+            ShellResult(exitCode, stdout, stderr)
+        } catch (e: Exception) {
+            Log.e(TAG, "executeViaRuntime failed", e)
+            ShellResult(-1, "", e.message ?: "Unknown error")
+        }
+    }
+
+    // ── 剪贴板操作（通过 Shell） ──
+
+    /**
+     * 通过 shell 读取剪贴板（绕过 Android 10+ 限制）
+     *
+     * 使用 dumpsys clipboard 命令从系统级读取剪贴板内容。
+     */
+    fun readClipboardViaShell(): String {
+        val result = execShell("dumpsys clipboard")
+        if (!result.isSuccess || result.stdout.isBlank()) return ""
+
+        val output = result.stdout
+
+        // 解析 dumpsys 输出: 尝试提取文本内容
+        // Android 12+: "T:text内容"
+        val tPattern = Regex("""T:([^}]+)""")
+        tPattern.find(output)?.let { return it.groupValues[1].trim() }
+
+        // 回退: text/plain 后的内容
+        val plainPattern = Regex("""text/plain[^{]*\{([^}]*)\}""")
+        plainPattern.find(output)?.let { return it.groupValues[1].trim() }
+
+        Log.d(TAG, "Could not parse clipboard text from dumpsys")
+        return ""
+    }
+
+    /**
+     * 通过 shell 清除剪贴板
+     */
+    fun clearClipboardViaShell(): Boolean {
+        // 方法1: service call clipboard
+        val r1 = execShell("service call clipboard 2 i32 0 s16 ''")
+        if (r1.isSuccess) {
+            Log.i(TAG, "Clipboard cleared via service call")
+            return true
+        }
+
+        // 方法2: cmd clipboard set
+        val r2 = execShell("cmd clipboard set '' 2>/dev/null")
+        if (r2.isSuccess) {
+            Log.i(TAG, "Clipboard cleared via cmd clipboard")
+            return true
+        }
+
+        Log.w(TAG, "All shell clipboard clear methods failed")
+        return false
+    }
+
+    // ── 工具方法 ──
+
+    private fun parseShellResult(raw: String): ShellResult {
+        val parts = raw.split("|", limit = 3)
+        return if (parts.size >= 3) {
+            val exitCode = parts[0].toIntOrNull() ?: -1
+            ShellResult(exitCode, parts[1], parts[2])
+        } else {
+            ShellResult(-1, raw, "")
         }
     }
 
