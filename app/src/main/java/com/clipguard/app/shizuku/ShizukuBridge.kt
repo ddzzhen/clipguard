@@ -36,6 +36,7 @@ object ShizukuBridge {
 
     // UserService 代理引用
     private var userService: IClipGuardInterface? = null
+    private var userServiceArgs: Shizuku.UserServiceArgs? = null
     private val serviceLock = Any()
 
     /**
@@ -90,6 +91,7 @@ object ShizukuBridge {
                 "com.clipguard.app.shizuku.ShizukuUserService"
             )
             val args = Shizuku.UserServiceArgs(componentName)
+            userServiceArgs = args
 
             Shizuku.bindUserService(args, userServiceConnection)
             Log.i(TAG, "UserService binding requested")
@@ -100,12 +102,15 @@ object ShizukuBridge {
 
     fun unbindUserService() {
         try {
-            // Shizuku 13.x: unbindUserService(ServiceConnection) — 单参数版本
-            Shizuku.unbindUserService(userServiceConnection)
+            val args = userServiceArgs
+            if (args != null) {
+                Shizuku.unbindUserService(args, userServiceConnection)
+            }
         } catch (e: Exception) {
             Log.e(TAG, "unbindUserService failed", e)
         }
         synchronized(serviceLock) { userService = null }
+        userServiceArgs = null
         _isUserServiceBound.value = false
     }
 
