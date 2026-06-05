@@ -2,6 +2,14 @@
 -keep class rikka.shizuku.** { *; }
 -dontwarn rikka.shizuku.**
 
+# 保持 ShizukuProvider
+-keep class rikka.shizuku.ShizukuProvider { *; }
+
+# 保持反射调用的 Shizuku.newProcess 方法
+-keepclassmembers class rikka.shizuku.Shizuku {
+    private static java.lang.Process newProcess(java.lang.String[], java.lang.String[], java.lang.String);
+}
+
 # Kotlin Serialization
 -keepattributes *Annotation*, InnerClasses
 -keep class kotlinx.serialization.** { *; }

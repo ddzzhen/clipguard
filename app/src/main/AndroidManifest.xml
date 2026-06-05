@@ -33,6 +33,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.ClipGuard">
 
+        <!-- Shizuku Provider（必须！Shizuku Manager 依赖此 Provider 发现应用） -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:enabled="true"
+            android:exported="true"
+            android:multiprocess="false"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -62,15 +71,6 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
-        </service>
-
-        <!-- Shizuku UserService（shell 权限进程中执行命令和剪贴板操作） -->
-        <service
-            android:name=".shizuku.ShizukuUserService"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="moe.shizuku.api.action.BIND_USER_SERVICE" />
-            </intent-filter>
         </service>
 
         <!-- 开机自启广播 -->

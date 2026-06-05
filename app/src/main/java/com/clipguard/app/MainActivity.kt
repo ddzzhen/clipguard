@@ -50,19 +50,23 @@ class MainActivity : ComponentActivity() {
 
         // 延迟初始化 Shizuku，避免 decorView 空指针和 binder 未就绪
         lifecycleScope.launch {
-            delay(200)
+            delay(300)
             try {
                 ShizukuBridge.init()
             } catch (_: Throwable) {}
-            delay(600)
+            // 等 binder 连接后再请求授权
+            delay(1000)
             try {
-                ShizukuBridge.requestPermission(this@MainActivity)
+                if (ShizukuBridge.isBinderAlive.value) {
+                    ShizukuBridge.requestPermission(this@MainActivity)
+                }
             } catch (_: Throwable) {}
         }
 
         setContent {
             ClipGuardTheme {
                 val shizukuAvailable by ShizukuBridge.isAvailable.collectAsStateWithLifecycle()
+                val shizukuAuthorized by ShizukuBridge.hasPermissionFlow.collectAsStateWithLifecycle()
                 val serviceRunning by _serviceRunning.collectAsStateWithLifecycle()
                 val accessibilityEnabled = remember { mutableStateOf(isAccessibilityServiceEnabled()) }
 
@@ -78,6 +82,7 @@ class MainActivity : ComponentActivity() {
 
                 ClipGuardNav(
                     shizukuAvailable = shizukuAvailable,
+                    shizukuAuthorized = shizukuAuthorized,
                     serviceRunning = serviceRunning,
                     accessibilityEnabled = accessibilityEnabled.value,
                     eventCount = eventState.value,
@@ -91,6 +96,13 @@ class MainActivity : ComponentActivity() {
                     },
                     onNavigateToAccessibilitySettings = {
                         openAccessibilitySettings()
+                    },
+                    onRequestShizukuPermission = {
+                        lifecycleScope.launch {
+                            try {
+                                ShizukuBridge.requestPermission(this@MainActivity)
+                            } catch (_: Throwable) {}
+                        }
                     },
                     onRefreshEvents = { eventState.value++ }
                 )
@@ -168,11 +180,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ClipGuardNav(
     shizukuAvailable: Boolean,
+    shizukuAuthorized: Boolean,
     serviceRunning: Boolean,
     accessibilityEnabled: Boolean,
     eventCount: Int,
     onToggleService: (Boolean) -> Unit,
     onNavigateToAccessibilitySettings: () -> Unit,
+    onRequestShizukuPermission: () -> Unit,
     onRefreshEvents: () -> Unit
 ) {
     var currentScreen by remember { mutableStateOf("home") }
@@ -195,13 +209,15 @@ fun ClipGuardNav(
         else -> {
             HomeScreen(
                 shizukuAvailable = shizukuAvailable,
+                shizukuAuthorized = shizukuAuthorized,
                 serviceRunning = serviceRunning,
                 accessibilityEnabled = accessibilityEnabled,
                 eventCount = eventCount,
                 onToggleService = onToggleService,
                 onNavigateToClipboard = { currentScreen = "clipboard" },
                 onNavigateToPermissions = { currentScreen = "permissions" },
-                onNavigateToAccessibilitySettings = onNavigateToAccessibilitySettings
+                onNavigateToAccessibilitySettings = onNavigateToAccessibilitySettings,
+                onRequestShizukuPermission = onRequestShizukuPermission
             )
         }
     }

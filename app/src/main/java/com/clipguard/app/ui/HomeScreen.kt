@@ -30,13 +30,15 @@ import java.util.*
 @Composable
 fun HomeScreen(
     shizukuAvailable: Boolean,
+    shizukuAuthorized: Boolean,
     serviceRunning: Boolean,
     accessibilityEnabled: Boolean,
     eventCount: Int,
     onToggleService: (Boolean) -> Unit,
     onNavigateToClipboard: () -> Unit,
     onNavigateToPermissions: () -> Unit,
-    onNavigateToAccessibilitySettings: () -> Unit
+    onNavigateToAccessibilitySettings: () -> Unit,
+    onRequestShizukuPermission: () -> Unit
 ) {
     LazyColumn(
         modifier = Modifier
@@ -105,10 +107,57 @@ fun HomeScreen(
             }
         }
 
+        // Shizuku 未授权提示
+        if (shizukuAvailable && !shizukuAuthorized) {
+            item {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(onClick = onRequestShizukuPermission),
+                    colors = CardDefaults.cardColors(containerColor = InfoBlue.copy(alpha = 0.15f)),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Bolt,
+                            contentDescription = null,
+                            tint = InfoBlue,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "Shizuku 已连接，但未授权",
+                                fontWeight = FontWeight.SemiBold,
+                                color = InfoBlue,
+                                fontSize = 15.sp
+                            )
+                            Text(
+                                "点击此处请求授权，授权后可读取和清除剪贴板",
+                                fontSize = 13.sp,
+                                color = OnDarkTextMuted
+                            )
+                        }
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = InfoBlue
+                        )
+                    }
+                }
+            }
+        }
+
         // 状态卡片
         item {
             StatusCards(
                 shizukuAvailable = shizukuAvailable,
+                shizukuAuthorized = shizukuAuthorized,
                 serviceRunning = serviceRunning,
                 accessibilityEnabled = accessibilityEnabled,
                 eventCount = eventCount
@@ -201,8 +250,12 @@ fun HomeScreen(
                     ProtectionMethodRow(
                         icon = Icons.Default.Bolt,
                         label = "Shizuku 辅助",
-                        description = if (shizukuAvailable) "已连接 - Shell 层级剪贴板操作" else "未连接 - 安装 Shizuku 并授权",
-                        isActive = shizukuAvailable
+                        description = when {
+                            !shizukuAvailable -> "未连接 - 安装 Shizuku 并启动"
+                            !shizukuAuthorized -> "已连接但未授权 - 点击上方卡片授权"
+                            else -> "已授权 - Shell 层级剪贴板操作"
+                        },
+                        isActive = shizukuAuthorized
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     ProtectionMethodRow(
@@ -241,6 +294,7 @@ fun HomeScreen(
 @Composable
 private fun StatusCards(
     shizukuAvailable: Boolean,
+    shizukuAuthorized: Boolean,
     serviceRunning: Boolean,
     accessibilityEnabled: Boolean,
     eventCount: Int
@@ -260,8 +314,12 @@ private fun StatusCards(
             modifier = Modifier.weight(1f),
             icon = Icons.Default.Bolt,
             label = "Shizuku",
-            value = if (shizukuAvailable) "已连接" else "未连接",
-            isGood = shizukuAvailable
+            value = when {
+                !shizukuAvailable -> "未连接"
+                !shizukuAuthorized -> "待授权"
+                else -> "已授权"
+            },
+            isGood = shizukuAuthorized
         )
         StatusCard(
             modifier = Modifier.weight(1f),

@@ -18,6 +18,7 @@ import com.clipguard.app.detector.SensitiveDataDetector
 import com.clipguard.app.model.ClipboardEvent
 import com.clipguard.app.model.ClipboardEvent.ActionTaken
 import com.clipguard.app.model.ClipboardEvent.DetectedType
+import com.clipguard.app.shizuku.ShizukuBridge
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -167,23 +168,49 @@ class ClipboardAccessibilityService : AccessibilityService() {
 
     /**
      * 主动检查剪贴板内容
-     * AccessibilityService 环境下，有机会读取到其他 app 写入的内容
+     *
+     * 策略：
+     * 1. 先尝试 ClipboardManager 直接读取（app 前台时可用）
+     * 2. 如果为 null（Android 10+ 后台限制），通过 Shizuku shell 读取
+     * 3. 如果都读不到，至少尝试清除剪贴板防止隐私泄露
      */
     private fun checkClipboard() {
         try {
-            val clip = clipboardManager.primaryClip ?: return
-            if (clip.itemCount == 0) return
-
-            val text = clip.getItemAt(0).text?.toString()
-            if (text.isNullOrEmpty()) {
-                Log.d(TAG, "Clipboard content unreadable (may be background restriction)")
-                return
+            // 策略1: ClipboardManager 直接读取
+            val clip = clipboardManager.primaryClip
+            if (clip != null && clip.itemCount > 0) {
+                val text = clip.getItemAt(0).text?.toString()
+                if (!text.isNullOrEmpty() && text != lastClipText) {
+                    lastClipText = text
+                    Log.i(TAG, "Clipboard captured via API: ${text.take(50)}...")
+                    processClipboardContent(text)
+                    return
+                }
             }
-            if (text == lastClipText) return
 
-            lastClipText = text
-            Log.d(TAG, "Clipboard content captured: ${text.take(50)}...")
-            processClipboardContent(text)
+            // 策略2: 通过 Shizuku shell 读取（绕过 Android 10+ 限制）
+            if (ShizukuBridge.hasPermission()) {
+                val shellText = ShizukuBridge.readClipboardViaShell()
+                if (shellText.isNotBlank() && shellText != lastClipText) {
+                    lastClipText = shellText
+                    Log.i(TAG, "Clipboard captured via Shizuku shell: ${shellText.take(50)}...")
+                    processClipboardContent(shellText)
+                    return
+                }
+            }
+
+            // 策略3: 读不到内容但检测到剪贴板变化事件
+            // 至少记录并尝试通过 shell 清除（盲清）
+            if (ShizukuBridge.hasPermission()) {
+                ShizukuBridge.clearClipboardViaShell()
+                addEvent(ClipboardEvent(
+                    content = "(内容已通过 shell 清除，Android 10+ 限制无法读取)",
+                    detectedTypes = listOf(DetectedType.NONE),
+                    sourcePackage = getForegroundPackage(),
+                    actionTaken = ActionTaken.CLEARED
+                ))
+                Log.i(TAG, "Clipboard cleared via Shizuku shell (content unreadable)")
+            }
         } catch (e: Exception) {
             Log.e(TAG, "checkClipboard failed", e)
         }
