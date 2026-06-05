@@ -146,8 +146,7 @@ object ShizukuBridge {
      * 通过反射调用 Shizuku.newProcess(String[], String[], String)
      */
     @Suppress("BanUncheckedReflection")
-    private fun executeViaShizukuReflection(command: String): ShellResult {
-        try {
+    private fun executeViaShizukuReflection(command: String): ShellResult = try {
             // 缓存反射方法
             if (newProcessMethod == null) {
                 newProcessMethod = Shizuku::class.java.getDeclaredMethod(
@@ -172,7 +171,6 @@ object ShizukuBridge {
             Log.e(TAG, "executeViaShizukuReflection failed", e)
             throw e
         }
-    }
 
     /**
      * Runtime.exec() 回退（普通应用权限）
