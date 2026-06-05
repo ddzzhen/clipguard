@@ -14,10 +14,12 @@ import rikka.shizuku.Shizuku
  *
  * 管理 Shizuku binder 生命周期，提供 shell 权限命令执行和剪贴板操作。
  *
- * 命令执行策略（按优先级）：
- * 1. Shizuku.newProcess() — 直接以 shell 权限执行命令（最可靠）
- * 2. Shizuku UserService — 在独立 shell 进程中运行（备选）
- * 3. Runtime.exec() 回退 — 普通应用权限（有限功能）
+ * 命令执行策略：
+ * 1. Shizuku UserService — 在独立 shell 进程中运行（优先）
+ * 2. Runtime.exec() 回退 — 普通应用权限（UserService 未绑定时）
+ *
+ * 注意：Shizuku 13.x 中 newProcess() 已从公开 API 移除。
+ * UserService 是官方推荐的替代方案。
  */
 object ShizukuBridge {
 
@@ -43,21 +45,24 @@ object ShizukuBridge {
         try {
             refreshState()
 
-            Shizuku.addBinderReceivedListener {
-                Log.i(TAG, "Shizuku binder received")
-                _isBinderAlive.value = true
-                refreshState()
-                // binder 恢复后重新绑定 UserService
-                if (hasPermission()) bindUserService()
-            }
+            try {
+                Shizuku.addBinderReceivedListener {
+                    Log.i(TAG, "Shizuku binder received")
+                    _isBinderAlive.value = true
+                    refreshState()
+                    if (hasPermission()) bindUserService()
+                }
+            } catch (_: Throwable) {}
 
-            Shizuku.addBinderDeadListener {
-                Log.w(TAG, "Shizuku binder dead")
-                _isBinderAlive.value = false
-                _isUserServiceBound.value = false
-                synchronized(serviceLock) { userService = null }
-                refreshState()
-            }
+            try {
+                Shizuku.addBinderDeadListener {
+                    Log.w(TAG, "Shizuku binder dead")
+                    _isBinderAlive.value = false
+                    _isUserServiceBound.value = false
+                    synchronized(serviceLock) { userService = null }
+                    refreshState()
+                }
+            } catch (_: Throwable) {}
 
             // 初始绑定
             if (Shizuku.pingBinder() && hasPermission()) {
@@ -79,13 +84,12 @@ object ShizukuBridge {
         }
 
         try {
+            // Shizuku 13.x UserServiceArgs: 使用基本构造器
             val componentName = ComponentName(
                 "com.clipguard.app",
                 "com.clipguard.app.shizuku.ShizukuUserService"
             )
             val args = Shizuku.UserServiceArgs(componentName)
-                .daemon(false)
-                .processNameSuffix("clipguard")
 
             Shizuku.bindUserService(args, userServiceConnection)
             Log.i(TAG, "UserService binding requested")
@@ -96,7 +100,8 @@ object ShizukuBridge {
 
     fun unbindUserService() {
         try {
-            Shizuku.unbindUserService(userServiceConnection, true)
+            // Shizuku 13.x: unbindUserService(ServiceConnection) — 单参数版本
+            Shizuku.unbindUserService(userServiceConnection)
         } catch (e: Exception) {
             Log.e(TAG, "unbindUserService failed", e)
         }
@@ -109,8 +114,6 @@ object ShizukuBridge {
             Log.i(TAG, "UserService connected")
             if (binder != null) {
                 try {
-                    // Shizuku 使用 IClipGuardInterface 进行 IPC，
-                    // binder 是 Shizuku 生成的代理对象
                     synchronized(serviceLock) {
                         @Suppress("UNCHECKED_CAST")
                         userService = binder as? IClipGuardInterface
@@ -165,27 +168,22 @@ object ShizukuBridge {
     // ── Shell 命令执行 ──
 
     /**
-     * 以 shell 权限执行命令
+     * 执行 shell 命令
      *
-     * 优先使用 Shizuku.newProcess()（shell 权限进程），
-     * 不可用时回退到 UserService 或 Runtime.exec()。
+     * 优先使用 Shizuku UserService（shell 权限进程），
+     * 不可用时回退到 Runtime.exec()（普通应用权限）。
+     *
+     * 注意：Shizuku 13.x 中 newProcess() 已移除。
+     * 权限提升依赖 UserService 在独立 shell 进程中运行。
      */
     fun execShell(vararg commands: String): ShellResult {
         val command = commands.joinToString(" ")
 
-        // 策略1: 使用 Shizuku.newProcess()（shell 权限）
-        if (hasPermission()) {
-            try {
-                return executeViaShizuku(command)
-            } catch (e: Exception) {
-                Log.w(TAG, "Shizuku.newProcess failed, trying UserService", e)
-            }
-        }
-
-        // 策略2: 使用已绑定的 UserService
+        // 策略1: 使用已绑定的 UserService（shell 权限）
         synchronized(serviceLock) {
             userService?.let { service ->
                 return try {
+                    Log.d(TAG, "Executing via UserService: $command")
                     val raw = service.execShell(command)
                     parseShellResult(raw)
                 } catch (e: Exception) {
@@ -195,27 +193,10 @@ object ShizukuBridge {
             }
         }
 
-        // 策略3: 回退到 Runtime.exec()（普通权限，pm grant/revoke 会失败）
-        Log.w(TAG, "Falling back to Runtime.exec (no elevated privileges)")
+        // 策略2: 回退到 Runtime.exec()（普通权限）
+        // pm grant/revoke 需要 shell 权限，此回退方案对这些命令无效
+        Log.w(TAG, "UserService not bound, falling back to Runtime.exec (no elevated privileges)")
         return executeViaRuntime(command)
-    }
-
-    /**
-     * 通过 Shizuku.newProcess() 执行命令（shell 权限）
-     */
-    private fun executeViaShizuku(command: String): ShellResult {
-        return try {
-            Log.d(TAG, "Executing via Shizuku: $command")
-            @Suppress("DEPRECATION")
-            val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
-            val exitCode = process.waitFor()
-            val stdout = process.inputStream.bufferedReader().readText()
-            val stderr = process.errorStream.bufferedReader().readText()
-            ShellResult(exitCode, stdout, stderr)
-        } catch (e: Exception) {
-            Log.e(TAG, "executeViaShizuku failed", e)
-            throw e
-        }
     }
 
     /**
@@ -238,9 +219,7 @@ object ShizukuBridge {
     // ── 剪贴板操作（通过 Shell） ──
 
     /**
-     * 通过 shell 读取剪贴板（绕过 Android 10+ 限制）
-     *
-     * 使用 dumpsys clipboard 命令从系统级读取剪贴板内容。
+     * 通过 shell 读取剪贴板（需要 UserService 绑定才能绕过 Android 10+ 限制）
      */
     fun readClipboardViaShell(): String {
         val result = execShell("dumpsys clipboard")
@@ -248,8 +227,7 @@ object ShizukuBridge {
 
         val output = result.stdout
 
-        // 解析 dumpsys 输出: 尝试提取文本内容
-        // Android 12+: "T:text内容"
+        // 解析 dumpsys 输出: Android 12+ "T:text内容"
         val tPattern = Regex("""T:([^}]+)""")
         tPattern.find(output)?.let { return it.groupValues[1].trim() }
 
@@ -262,7 +240,7 @@ object ShizukuBridge {
     }
 
     /**
-     * 通过 shell 清除剪贴板
+     * 通过 shell 清除剪贴板（需要 UserService 绑定）
      */
     fun clearClipboardViaShell(): Boolean {
         // 方法1: service call clipboard
